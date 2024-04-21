@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "MyActuatorBottango",
+			"path": "../MyActuatorBottango"
+		}
+	],
+	"settings": {}
+}
