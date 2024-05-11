@@ -18,5 +18,6 @@ void Motor1_Stop();
 void Motor2_Stop();
 void Motor3_Stop();
 void Motors_Stop();
+void Stop_Motor(int id);
 
 #endif

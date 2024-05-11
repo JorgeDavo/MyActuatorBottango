@@ -13,8 +13,22 @@ CAN_device_t CAN_cfg;              // CAN Config
 unsigned long previousMillis = 0;  // will store last time a CAN Message was send
 unsigned long previousMillis1 = 0; // will store last time a CAN Message was send
 unsigned long currentMillis = millis();
+
+unsigned long lastTrueTime = 0; // stores the last time allPositionsWithinRange was true
+
 const int interval = 0;       // interval at which send CAN Messages (milliseconds)
 const int rx_queue_size = 10; // Receive Queue size
+
+const int nOfMotors = 2; // Number of motors
+
+float currentMotorPositions[nOfMotors]; // Array to store positions of 7 motors
+bool receivedMotorPositions[nOfMotors]; // Array to store if the position of a motor has been received
+float targetMotorPositions[nOfMotors];
+
+const int AUTO_HOME_SPEED = 2000;
+
+bool autoHoming = false;
+bool ahSent = false;
 
 namespace Callbacks
 {
@@ -43,38 +57,186 @@ namespace Callbacks
     }
   }
 
+  float calculateEncoderPosition(float encoder, bool singleTurn = true)
+  { // singleTurn == true returns single turn position, false returns multi-turn position
+    if (singleTurn)
+    {
+      float position = fmod((encoder / 65536.0 * 360.0), 360.0);
+      if (position < 0)
+      {
+        position += 360.0;
+      }
+      return position;
+    }
+    else
+    {
+      return encoder / 65536.0 * 360.0;
+    }
+  }
+
+  float calculateAngleDistance(float angle1, float angle2)
+  {
+    return abs(angle1 - angle2);
+  }
+
+  void requestMotorPositions()
+  {
+    for (int motorIndex = 0; motorIndex < nOfMotors; motorIndex++)
+    {
+      int motorId = 0x140 + motorIndex + 1;
+      CAN_frame_t tx_frame;
+      tx_frame.FIR.B.FF = CAN_frame_std;
+      tx_frame.MsgID = motorId;   // CAN ID
+      tx_frame.FIR.B.DLC = 8;     // Data length
+      tx_frame.data.u8[0] = 0x60; // Command byte to request position
+      for (int i = 1; i < 8; i++)
+      {
+        tx_frame.data.u8[i] = 0x00; // NULL rest of data
+      }
+
+      ESP32Can.CANWriteFrame(&tx_frame);
+
+      CAN_frame_t rx_frame;
+      if (xQueueReceive(CAN_cfg.rx_queue, &rx_frame, 0) == pdTRUE)
+      {
+        if (rx_frame.MsgID >= 0x240 && rx_frame.MsgID <= 0x240 + nOfMotors)
+        { // Check for correct response IDs
+          int32_t encoder = rx_frame.data.u8[4] | (rx_frame.data.u8[5] << 8) |
+                            (rx_frame.data.u8[6] << 16) | (rx_frame.data.u8[7] << 24);
+          int motorMessageIndex = rx_frame.MsgID - 0x240; // Calculate motor index based on ID
+          if (motorMessageIndex >= 1 && motorMessageIndex <= nOfMotors)
+          {                                                                                          // Ensure the index is within bounds
+            currentMotorPositions[motorMessageIndex - 1] = calculateEncoderPosition(encoder, false); // Store position in the array
+          }
+        }
+      }
+    }
+  }
+
   void sendCustomMotionControlCommand(MotionControlData data)
   {
-    // Parameters for motion control 運動控制参数
-    float v_des = 0; // Desired velocity 期望速度
-    float t_ff = 0;  // Feedforward torque 前馈扭矩
+    if (!autoHoming)
+    {
+      // Parameters for motion control 運動控制参数
+      float v_des = 0; // Desired velocity 期望速度
+      float t_ff = 0;  // Feedforward torque 前馈扭矩
 
-    // Adapt control parameters based on type and signal
+      // Adapt control parameters based on type and signal
 
-    uint16_t p_des_packed = (uint16_t)(data.p_des_position + 32767.5);
-    // uint16_t p_des_packed = (uint16_t)(data.p_des_position + 29350);
+      uint16_t p_des_packed = (uint16_t)(data.p_des_position + 32767.5);
+      // uint16_t p_des_packed = (uint16_t)(data.p_des_position + 29350);
 
-    uint16_t v_des_packed = (uint16_t)(((v_des + 45) / 90.0) * 4095);
-    uint16_t t_ff_packed = (uint16_t)(((t_ff + 24) / 48.0) * 4095);
-    uint16_t kp_packed = (uint16_t)((data.kp / 500.0) * 4095);
-    uint16_t kd_packed = (uint16_t)((data.kd / 5.0) * 4095);
+      uint16_t v_des_packed = (uint16_t)(((v_des + 45) / 90.0) * 4095);
+      uint16_t t_ff_packed = (uint16_t)(((t_ff + 24) / 48.0) * 4095);
+      uint16_t kp_packed = (uint16_t)((data.kp / 500.0) * 4095);
+      uint16_t kd_packed = (uint16_t)((data.kd / 5.0) * 4095);
 
-    // Preparing the CAN message buffer 准备CAN消息缓冲区
+      // Preparing the CAN message buffer 准备CAN消息缓冲区
 
-    CAN_frame_t rx_frame;
-    CAN_frame_t tx_frame;
-    tx_frame.FIR.B.FF = CAN_frame_std;
-    tx_frame.MsgID = data.id;
-    tx_frame.FIR.B.DLC = 8;
-    tx_frame.data.u8[0] = p_des_packed >> 8;
-    tx_frame.data.u8[1] = p_des_packed & 0xFF;
-    tx_frame.data.u8[2] = v_des_packed >> 4;
-    tx_frame.data.u8[3] = ((v_des_packed & 0xF) << 4) | (kp_packed >> 8);
-    tx_frame.data.u8[4] = kp_packed & 0xFF;
-    tx_frame.data.u8[5] = kd_packed >> 4;
-    tx_frame.data.u8[6] = ((kd_packed & 0xF) << 4) | (t_ff_packed >> 8);
-    tx_frame.data.u8[7] = t_ff_packed & 0xFF;
-    ESP32Can.CANWriteFrame(&tx_frame);
+      CAN_frame_t rx_frame;
+      CAN_frame_t tx_frame;
+      tx_frame.FIR.B.FF = CAN_frame_std;
+      tx_frame.MsgID = data.id;
+      tx_frame.FIR.B.DLC = 8;
+      tx_frame.data.u8[0] = p_des_packed >> 8;
+      tx_frame.data.u8[1] = p_des_packed & 0xFF;
+      tx_frame.data.u8[2] = v_des_packed >> 4;
+      tx_frame.data.u8[3] = ((v_des_packed & 0xF) << 4) | (kp_packed >> 8);
+      tx_frame.data.u8[4] = kp_packed & 0xFF;
+      tx_frame.data.u8[5] = kd_packed >> 4;
+      tx_frame.data.u8[6] = ((kd_packed & 0xF) << 4) | (t_ff_packed >> 8);
+      tx_frame.data.u8[7] = t_ff_packed & 0xFF;
+
+      ESP32Can.CANWriteFrame(&tx_frame);
+    }
+    else
+    {
+      int currentId = data.id - 0x400;
+      if (currentId >= 1 && currentId <= nOfMotors)
+      {
+        receivedMotorPositions[currentId - 1] = true;
+        targetMotorPositions[currentId - 1] = map(data.p_des_position, 1, 3700, 0, 30);
+        // Serial.print("m1 " + String(currentId) + " target: " + String(targetMotorPositions[currentId - 1]) + " current: " + String(currentMotorPositions[currentId - 1]) + " distance: " + String(calculateAngleDistance(currentMotorPositions[currentId - 1], targetMotorPositions[currentId - 1])));
+      }
+
+      bool allReceived = true;
+
+      for (int i = 0; i < nOfMotors; i++)
+      {
+        if (!receivedMotorPositions[i])
+        {
+          allReceived = false;
+          break;
+        }
+      }
+
+      requestMotorPositions();
+
+      bool allPositionsWithinRange = true;
+
+      for (int i = 0; i < nOfMotors; i++)
+      {
+        if (calculateAngleDistance(currentMotorPositions[i], targetMotorPositions[i]) > 1)
+        {
+          Serial.println("M" + String(i + 1) + " dist: " + String(calculateAngleDistance(currentMotorPositions[i], targetMotorPositions[i])));
+          allPositionsWithinRange = false;
+          break;
+        }
+      }
+
+      if (allPositionsWithinRange)
+      {
+
+        delay(100);
+        unsigned long currentTime = millis();
+        if (currentTime - lastTrueTime > 500)
+        {
+          for (int i = 0; i < nOfMotors; i++)
+          {
+            Stop_Motor(i + 1);
+          }
+          autoHoming = false;
+          ahSent = false;
+          allReceived = false;
+          for (int i = 0; i < nOfMotors; i++)
+          {
+            receivedMotorPositions[i] = false;
+          }
+
+          Serial.println("Auto homing complete");
+          strip.setPixelColor(0, strip.Color(0, 20, 0)); // Green color
+          strip.show();
+        }
+        else
+        {
+          lastTrueTime = currentTime;
+        }
+      }
+      else
+      {
+
+        if (allReceived && !ahSent)
+        {
+          ESP32Can.CANInit();
+          for (int i = 0; i < nOfMotors; i++)
+          {
+            Stop_Motor(i + 1);
+          }
+          delay(100);
+          ahSent = true;
+          for (int i = 0; i < nOfMotors; i++)
+          {
+            int destinationAngle = targetMotorPositions[i] * 100;
+            Serial.println("Sending motor " + String(i + 1) + " to " + String(destinationAngle));
+            sendMotorCommand(destinationAngle, AUTO_HOME_SPEED, 0x140 + i + 1);
+            delay(30);
+          }
+        }
+
+        strip.setPixelColor(0, strip.Color(20, 15, 0)); // Yellow color
+        strip.show();
+      }
+    }
 
     // Sending the CAN message 发送CAN消息
     // CAN.sendMsgBuf(0x400 + 1, 0, 8, buffer); // Send command with a predefined ID (0x401) 使用预定义的ID（0x401）发送命令
@@ -92,12 +254,12 @@ namespace Callbacks
       }
     }
   }
-
   void onThisControllerStarted()
   {
     strip.begin(); // Initialize the strip
     strip.show();  // Initialize all pixels to 'off'
     Motor1_Stop();
+    autoHoming = true;
     // Set the first LED to red during startup
     strip.setPixelColor(0, strip.Color(20, 0, 0)); // Red color
     strip.show();                                  // Update the strip to show the color
@@ -128,16 +290,18 @@ namespace Callbacks
     CAN_cfg.rx_queue = xQueueCreate(rx_queue_size, sizeof(CAN_frame_t));
     // Init CAN Module
     ESP32Can.CANInit();
-    //delay(10);
-    //Motor1_Stop();
-    //Motor2_Stop();
-    //delay(10);
-    //sendMotorCommand(1, 20, 0x141);
-    //sendMotorCommand(1, 20, 0x142);
-    //delay(7000);
-    //Motor1_Stop();
-    //Motor2_Stop();
+    // delay(10);
+    // Motor1_Stop();
+    // Motor2_Stop();
+    // delay(10);
+    // sendMotorCommand(1, 50, 0x141);
+    // sendMotorCommand(1, 50, 0x142);
+    // delay(7000);
+    // Motor1_Stop();
+    // Motor2_Stop();
+
     delay(10);
+
     strip.setPixelColor(0, strip.Color(0, 20, 0)); // Green color
     strip.show();                                  // Update the strip to show the color
   }
