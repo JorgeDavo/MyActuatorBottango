@@ -19,16 +19,20 @@ unsigned long lastTrueTime = 0; // stores the last time allPositionsWithinRange 
 const int interval = 0;       // interval at which send CAN Messages (milliseconds)
 const int rx_queue_size = 10; // Receive Queue size
 
-const int nOfMotors = 2; // Number of motors
+const int nOfMotors = 1; // Number of motors
+
+const bool restrictMotion = true;     // Restrict motion to a certain range
+const float maxDistanceAngle = 180.0; // Maximum travel angle
 
 float currentMotorPositions[nOfMotors]; // Array to store positions of 7 motors
-bool receivedMotorPositions[nOfMotors]; // Array to store if the position of a motor has been received
+bool receivedMotorPositions[nOfMotors] = {false};
 float targetMotorPositions[nOfMotors];
 
-const int AUTO_HOME_SPEED = 2000;
+const int AUTO_HOME_SPEED = 250;
 
 bool autoHoming = false;
 bool ahSent = false;
+bool ahFailed = false;
 
 namespace Callbacks
 {
@@ -79,6 +83,37 @@ namespace Callbacks
     return abs(angle1 - angle2);
   }
 
+  void resetMotorMultiTurnPositions()
+  {
+    for (int motorIndex = 0; motorIndex < nOfMotors; motorIndex++)
+    {
+      int motorId = 0x140 + motorIndex + 1;
+      CAN_frame_t tx_frame;
+      tx_frame.FIR.B.FF = CAN_frame_std;
+      tx_frame.MsgID = motorId;   // CAN ID
+      tx_frame.FIR.B.DLC = 8;     // Data length
+      tx_frame.data.u8[0] = 0x64; // Command byte to reset multi-turn position
+      for (int i = 1; i < 8; i++)
+      {
+        tx_frame.data.u8[i] = 0x00; // NULL rest of data
+      }
+
+      ESP32Can.CANWriteFrame(&tx_frame);
+
+      // Send system reset command
+      CAN_frame_t reset_frame;
+      reset_frame.FIR.B.FF = CAN_frame_std;
+      reset_frame.MsgID = motorId;
+      reset_frame.FIR.B.DLC = 0; // No data
+      reset_frame.data.u8[0] = 0x76;
+      for (int i = 1; i < 8; i++)
+      {
+        reset_frame.data.u8[i] = 0x00; // NULL rest of data
+      }
+      ESP32Can.CANWriteFrame(&reset_frame);
+    }
+  }
+
   void requestMotorPositions()
   {
     for (int motorIndex = 0; motorIndex < nOfMotors; motorIndex++)
@@ -96,6 +131,8 @@ namespace Callbacks
 
       ESP32Can.CANWriteFrame(&tx_frame);
 
+      delay(50);
+
       CAN_frame_t rx_frame;
       if (xQueueReceive(CAN_cfg.rx_queue, &rx_frame, 0) == pdTRUE)
       {
@@ -104,9 +141,10 @@ namespace Callbacks
           int32_t encoder = rx_frame.data.u8[4] | (rx_frame.data.u8[5] << 8) |
                             (rx_frame.data.u8[6] << 16) | (rx_frame.data.u8[7] << 24);
           int motorMessageIndex = rx_frame.MsgID - 0x240; // Calculate motor index based on ID
-          if (motorMessageIndex >= 1 && motorMessageIndex <= nOfMotors)
+          if (motorMessageIndex >= 1 && motorMessageIndex <= nOfMotors && encoder != 0)
           {                                                                                          // Ensure the index is within bounds
             currentMotorPositions[motorMessageIndex - 1] = calculateEncoderPosition(encoder, false); // Store position in the array
+            // Serial.println("Motor " + String(motorMessageIndex) + " position: " + String(currentMotorPositions[motorMessageIndex - 1]));
           }
         }
       }
@@ -149,17 +187,24 @@ namespace Callbacks
 
       ESP32Can.CANWriteFrame(&tx_frame);
     }
-    else
+    else if (!ahFailed)
     {
+      requestMotorPositions();
+
+      strip.setPixelColor(0, strip.Color(20, 15, 0)); // Yellow color
+      strip.show();
+
       int currentId = data.id - 0x400;
-      if (currentId >= 1 && currentId <= nOfMotors)
+      if (currentId >= 1 && currentId <= nOfMotors && currentMotorPositions[currentId - 1] != 0)
       {
         receivedMotorPositions[currentId - 1] = true;
-        targetMotorPositions[currentId - 1] = map(data.p_des_position, 1, 3700, 0, 30);
-        // Serial.print("m1 " + String(currentId) + " target: " + String(targetMotorPositions[currentId - 1]) + " current: " + String(currentMotorPositions[currentId - 1]) + " distance: " + String(calculateAngleDistance(currentMotorPositions[currentId - 1], targetMotorPositions[currentId - 1])));
+        targetMotorPositions[currentId - 1] = map(data.p_des_position, -32767, 32767, -716.2, 716.2);
+        Serial.println("M" + String(currentId) + " -> target: " + String(targetMotorPositions[currentId - 1]) + " current: " + String(currentMotorPositions[currentId - 1]));
       }
 
       bool allReceived = true;
+
+      unsigned long lastFalseTime = 0;
 
       for (int i = 0; i < nOfMotors; i++)
       {
@@ -170,26 +215,24 @@ namespace Callbacks
         }
       }
 
-      requestMotorPositions();
-
       bool allPositionsWithinRange = true;
 
       for (int i = 0; i < nOfMotors; i++)
       {
-        if (calculateAngleDistance(currentMotorPositions[i], targetMotorPositions[i]) > 1)
+        float currentDistance = calculateAngleDistance(currentMotorPositions[i], targetMotorPositions[i]);
+        if (currentDistance > 5)
         {
-          Serial.println("M" + String(i + 1) + " dist: " + String(calculateAngleDistance(currentMotorPositions[i], targetMotorPositions[i])));
+          // Serial.println("M" + String(i + 1) + " dist: " + String(currentDistance));
           allPositionsWithinRange = false;
+          lastFalseTime = millis();
           break;
         }
       }
 
-      if (allPositionsWithinRange)
+      if (allPositionsWithinRange && allReceived)
       {
-
-        delay(100);
         unsigned long currentTime = millis();
-        if (currentTime - lastTrueTime > 500)
+        if (currentTime - max(lastTrueTime, lastFalseTime) > 500)
         {
           for (int i = 0; i < nOfMotors; i++)
           {
@@ -203,39 +246,43 @@ namespace Callbacks
             receivedMotorPositions[i] = false;
           }
 
-          Serial.println("Auto homing complete");
+          Serial.println("------Auto homing complete------");
           strip.setPixelColor(0, strip.Color(0, 20, 0)); // Green color
           strip.show();
         }
-        else
-        {
-          lastTrueTime = currentTime;
-        }
       }
-      else
+      else if (allReceived && !ahSent)
       {
-
-        if (allReceived && !ahSent)
+        ESP32Can.CANInit();
+        requestMotorPositions();
+        for (int i = 0; i < nOfMotors; i++)
         {
-          ESP32Can.CANInit();
-          for (int i = 0; i < nOfMotors; i++)
-          {
-            Stop_Motor(i + 1);
-          }
-          delay(100);
-          ahSent = true;
-          for (int i = 0; i < nOfMotors; i++)
-          {
-            int destinationAngle = targetMotorPositions[i] * 100;
-            Serial.println("Sending motor " + String(i + 1) + " to " + String(destinationAngle));
-            sendMotorCommand(destinationAngle, AUTO_HOME_SPEED, 0x140 + i + 1);
-            delay(30);
-          }
+          Stop_Motor(i + 1);
         }
-
-        strip.setPixelColor(0, strip.Color(20, 15, 0)); // Yellow color
-        strip.show();
+        delay(100);
+        ahSent = true;
+        for (int i = 0; i < nOfMotors; i++)
+        {
+          float currentDistance = calculateAngleDistance(currentMotorPositions[i], targetMotorPositions[i]);
+          if (restrictMotion && currentDistance > maxDistanceAngle)
+          {
+            allPositionsWithinRange = false;
+            ahFailed = true;
+            Serial.println("Motor " + String(i + 1) + " wants to travel " + String(currentDistance) + "deg, but max is " + String(maxDistanceAngle) + "deg");
+            Serial.println("------Auto homing failed------");
+            break;
+          }
+          int destinationAngle = targetMotorPositions[i] * 100;
+          Serial.println("Sending motor " + String(i + 1) + " to " + String(destinationAngle));
+          sendMotorCommand(destinationAngle, AUTO_HOME_SPEED, 0x140 + i + 1);
+          delay(30);
+        }
       }
+    }
+    else
+    {
+      strip.setPixelColor(0, strip.Color(20, 0, 20)); // Purple color
+      strip.show();
     }
 
     // Sending the CAN message 发送CAN消息
@@ -260,6 +307,8 @@ namespace Callbacks
     strip.show();  // Initialize all pixels to 'off'
     Motor1_Stop();
     autoHoming = true;
+    ahFailed = false;
+    // resetMotorMultiTurnPositions();
     // Set the first LED to red during startup
     strip.setPixelColor(0, strip.Color(20, 0, 0)); // Red color
     strip.show();                                  // Update the strip to show the color

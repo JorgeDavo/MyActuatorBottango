@@ -1,7 +1,7 @@
 #include "test.h"
 
-//Start,position1 to position2
-//Motor1 run to position1
+// Start,position1 to position2
+// Motor1 run to position1
 void Motor1_P1()
 {
   CAN_frame_t rx_frame;
@@ -11,16 +11,16 @@ void Motor1_P1()
   tx_frame.FIR.B.DLC = 8;
   tx_frame.data.u8[0] = 0xa4;
   tx_frame.data.u8[1] = 0x00;
-  tx_frame.data.u8[2] = 0x64; //speed
+  tx_frame.data.u8[2] = 0x64; // speed
   tx_frame.data.u8[3] = 0x00;
-  tx_frame.data.u8[4] = 0x0b; //position
+  tx_frame.data.u8[4] = 0x0b; // position
   tx_frame.data.u8[5] = 0xf4;
   tx_frame.data.u8[6] = 0xff;
   tx_frame.data.u8[7] = 0xff;
   ESP32Can.CANWriteFrame(&tx_frame);
 }
 
-//Motor2 run to position1
+// Motor2 run to position1
 void Motor2_P1()
 {
   CAN_frame_t rx_frame;
@@ -39,7 +39,7 @@ void Motor2_P1()
   ESP32Can.CANWriteFrame(&tx_frame);
 }
 
-//Motor3 run to position1
+// Motor3 run to position1
 void Motor3_P1()
 {
   CAN_frame_t rx_frame;
@@ -58,7 +58,7 @@ void Motor3_P1()
   ESP32Can.CANWriteFrame(&tx_frame);
 }
 
-//Motor1 run to position2
+// Motor1 run to position2
 void Motor1_P2()
 {
   CAN_frame_t rx_frame;
@@ -77,7 +77,7 @@ void Motor1_P2()
   ESP32Can.CANWriteFrame(&tx_frame);
 }
 
-//Motor2 run to position2
+// Motor2 run to position2
 void Motor2_P2()
 {
   CAN_frame_t rx_frame;
@@ -96,7 +96,7 @@ void Motor2_P2()
   ESP32Can.CANWriteFrame(&tx_frame);
 }
 
-//Motor3 run to position2
+// Motor3 run to position2
 void Motor3_P2()
 {
   CAN_frame_t rx_frame;
@@ -115,7 +115,7 @@ void Motor3_P2()
   ESP32Can.CANWriteFrame(&tx_frame);
 }
 
-//Motors stop
+// Motors stop
 void Motor1_Stop()
 {
   CAN_frame_t rx_frame;
@@ -176,6 +176,24 @@ void Motors_Stop()
   CAN_frame_t tx_frame;
   tx_frame.FIR.B.FF = CAN_frame_std;
   tx_frame.MsgID = 0x280;
+  tx_frame.FIR.B.DLC = 8;
+  tx_frame.data.u8[0] = 0x80;
+  tx_frame.data.u8[1] = 0x00;
+  tx_frame.data.u8[2] = 0x00;
+  tx_frame.data.u8[3] = 0x00;
+  tx_frame.data.u8[4] = 0x00;
+  tx_frame.data.u8[5] = 0x00;
+  tx_frame.data.u8[6] = 0x00;
+  tx_frame.data.u8[7] = 0x00;
+  ESP32Can.CANWriteFrame(&tx_frame);
+}
+
+void Stop_Motor(int id)
+{
+  CAN_frame_t rx_frame;
+  CAN_frame_t tx_frame;
+  tx_frame.FIR.B.FF = CAN_frame_std;
+  tx_frame.MsgID = 0x140 + id;
   tx_frame.FIR.B.DLC = 8;
   tx_frame.data.u8[0] = 0x80;
   tx_frame.data.u8[1] = 0x00;
