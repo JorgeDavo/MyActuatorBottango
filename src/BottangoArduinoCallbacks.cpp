@@ -390,7 +390,7 @@ namespace Callbacks
         data.p_des_position = signal; // Assuming 'position' is available in this scope
         data.id = 0x401;              // Adapt this based on your needs
         data.kp = 20;                 // Adapt this based on your needs45
-        data.kd = .4;                 // Adapt this based on your needs3
+        data.kd = .15;                 // Adapt this based on your needs3
         xQueueSend(signalQueue, &data, portMAX_DELAY);
         previousMillis = currentMillis; // Update time for the last command sent
       }

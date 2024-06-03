@@ -16,15 +16,17 @@ namespace GeneratedCommandStreams
     */
 
     bool playBegan = false;
-    bool playOnStart = true;
+    bool playOnStart = false; // Modified: set playOnStart to false
     bool loop = true;
     byte startingAnimation = 0;
 
     // called once per update loop, your logic probably goes here.
     void updatePlayStatus()
     {
+        static unsigned long startTime = millis(); // Added: variable to store the start time
+
         // if haven't started any animations, or if should loop and nothing is playing (IE the last loop ended)
-        if (playOnStart && (!playBegan || (loop && !BottangoCore::commandStreamProvider.streamIsInProgress())))
+        if (!playBegan && millis() - startTime >= 2000) // Modified: check if 5 seconds have passed
         {
             BottangoCore::commandStreamProvider.startCommandStream(startingAnimation, loop);
             playBegan = true;
