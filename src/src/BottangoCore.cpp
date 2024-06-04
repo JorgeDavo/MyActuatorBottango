@@ -30,6 +30,7 @@ namespace BottangoCore
 #ifdef USE_COMMAND_STREAM
         initialized = true;
         Callbacks::onThisControllerStarted();
+        GeneratedCommandStreams::SDSetup();
         commandStreamProvider.runSetup();
 #endif
     }
