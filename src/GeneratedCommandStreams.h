@@ -11,8 +11,8 @@ namespace GeneratedCommandStreams
     CommandStream *getCommandStream(byte streamID);
     void updatePlayStatus();
     void SDSetup();
-    extern CommandStream* setupStream;
-    extern CommandStream* stream_DefaultAnimation;
+    extern CommandStream setupStream;
+    extern CommandStream stream_DefaultAnimation;
     extern CommandStream stream_DefaultAnimation_loop;
 
 } // namespace GeneratedCommandStreams
