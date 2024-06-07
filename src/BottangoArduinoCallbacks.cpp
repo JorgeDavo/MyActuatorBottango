@@ -19,16 +19,16 @@ unsigned long lastTrueTime = 0; // stores the last time allPositionsWithinRange 
 const int interval = 0;       // interval at which send CAN Messages (milliseconds)
 const int rx_queue_size = 10; // Receive Queue size
 
-const int nOfMotors = 1; // Number of motors
+const int nOfMotors = 5; // Number of motors
 
 const bool restrictMotion = true;     // Restrict motion to a certain range
-const float maxDistanceAngle = 180.0; // Maximum travel angle
+const float maxDistanceAngle = 180.0; // Maximum travel angles
 
 float currentMotorPositions[nOfMotors]; // Array to store positions of 7 motors
 bool receivedMotorPositions[nOfMotors] = {false};
 float targetMotorPositions[nOfMotors];
 
-const int AUTO_HOME_SPEED = 250;
+const int AUTO_HOME_SPEED = 30;
 
 bool autoHoming = false;
 bool ahSent = false;
@@ -131,7 +131,7 @@ namespace Callbacks
 
       ESP32Can.CANWriteFrame(&tx_frame);
 
-      delay(50);
+      delay(10);
 
       CAN_frame_t rx_frame;
       if (xQueueReceive(CAN_cfg.rx_queue, &rx_frame, 0) == pdTRUE)
@@ -259,7 +259,7 @@ namespace Callbacks
         {
           Stop_Motor(i + 1);
         }
-        delay(100);
+        delay(10);
         ahSent = true;
         for (int i = 0; i < nOfMotors; i++)
         {
@@ -389,8 +389,8 @@ namespace Callbacks
       {
         data.p_des_position = signal; // Assuming 'position' is available in this scope
         data.id = 0x401;              // Adapt this based on your needs
-        data.kp = 20;                 // Adapt this based on your needs45
-        data.kd = .15;                 // Adapt this based on your needs3
+        data.kp = 80;                 // Adapt this based on your needs45
+        data.kd = 1;                 // Adapt this based on your needs3
         xQueueSend(signalQueue, &data, portMAX_DELAY);
         previousMillis = currentMillis; // Update time for the last command sent
       }
@@ -401,50 +401,50 @@ namespace Callbacks
       {
         data.p_des_position = signal; // Assuming 'position' is available in this scope
         data.id = 0x402;              // Adapt this based on your needs
-        data.kp = 20;                 // Adapt this based on your needs
-        data.kd = .15;                // Adapt this based on your needs
+        data.kp = 80;                 // Adapt this based on your needs
+        data.kd = 1;                // Adapt this based on your needs
         xQueueSend(signalQueue, &data, portMAX_DELAY);
         previousMillis1 = currentMillis;
       }
     }
     if (strcmp(effectorIdentifier, "3") == 0)
     {
-      data.p_des_position = signal; // Assuming 'position' is available in this scope
+      data.p_des_position = -signal; // Assuming 'position' is available in this scope
       data.id = 0x403;              // Adapt this based on your needs
       data.kp = 100;                // Adapt this based on your needs
-      data.kd = 2;                  // Adapt this based on your needs
+      data.kd = 1;                  // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
     if (strcmp(effectorIdentifier, "4") == 0)
     {
       data.p_des_position = signal; // Assuming 'position' is available in this scope
       data.id = 0x404;              // Adapt this based on your needs
-      data.kp = 20;                 // Adapt this based on your needs
-      data.kd = 0.15;               // Adapt this based on your needs
+      data.kp = 120;                 // Adapt this based on your needs
+      data.kd = 1;               // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
     if (strcmp(effectorIdentifier, "5") == 0)
     {
       data.p_des_position = signal; // Assuming 'position' is available in this scope
       data.id = 0x405;              // Adapt this based on your needs
-      data.kp = 20;                 // Adapt this based on your needs
-      data.kd = 0.15;               // Adapt this based on your needs
+      data.kp = 120;                 // Adapt this based on your needs
+      data.kd = 1;               // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
     if (strcmp(effectorIdentifier, "6") == 0)
     {
       data.p_des_position = signal; // Assuming 'position' is available in this scope
       data.id = 0x406;              // Adapt this based on your needs
-      data.kp = 20;                 // Adapt this based on your needs
-      data.kd = 0.15;               // Adapt this based on your needs
+      data.kp = 80;                 // Adapt this based on your needs
+      data.kd = 1;               // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
     if (strcmp(effectorIdentifier, "7") == 0)
     {
       data.p_des_position = signal; // Assuming 'position' is available in this scope
       data.id = 0x407;              // Adapt this based on your needs
-      data.kp = 20;                 // Adapt this based on your needs
-      data.kd = 0.15;               // Adapt this based on your needs
+      data.kp = 80;                 // Adapt this based on your needs
+      data.kd = 1;               // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
   }

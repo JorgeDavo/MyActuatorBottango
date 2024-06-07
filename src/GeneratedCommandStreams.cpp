@@ -28,7 +28,10 @@ namespace GeneratedCommandStreams
         // if haven't started any animations, or if should loop and nothing is playing (IE the last loop ended)
         if (!playBegan && millis() - startTime >= 2000) // Modified: check if 5 seconds have passed
         {
-            BottangoCore::commandStreamProvider.startCommandStream(startingAnimation, loop);
+#ifndef USE_COMMAND_STREAM
+            // BottangoCore::commandStreamProvider.startCommandStream(startingAnimation, loop);
+#endif
+
             playBegan = true;
         }
     }
@@ -41,7 +44,7 @@ namespace GeneratedCommandStreams
     const char STREAM_DEFAULTANIMATION_CHAR_STREAM_LOOP[] PROGMEM = "sC,1,10000,0,0,0,0,0,0,0\n";
 
     CommandStream setupStream = CommandStream(SETUP_CHAR_STREAM, 0);
-    CommandStream stream_DefaultAnimation = CommandStream(STREAM_DEFAULTANIMATION_CHAR_STREAM, 10000, STREAM_DEFAULTANIMATION_CHAR_STREAM_LOOP, 0);    
+    CommandStream stream_DefaultAnimation = CommandStream(STREAM_DEFAULTANIMATION_CHAR_STREAM, 10000, STREAM_DEFAULTANIMATION_CHAR_STREAM_LOOP, 0);
 
     CommandStream *getCommandStream(byte streamID)
     {
