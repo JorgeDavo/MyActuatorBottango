@@ -4,7 +4,7 @@
 // Basic configurations: //
 
 // !!PLAY SAVED TO CODE ANIMATIONS!!
-#define USE_COMMAND_STREAM                       //uncomment this line to drive animations from exported code instead of USB control
+// #define USE_COMMAND_STREAM                       //uncomment this line to drive animations from exported code instead of USB control
 
 
 // !!LIBRARIES!!

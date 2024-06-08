@@ -20,6 +20,7 @@ const int interval = 0;       // interval at which send CAN Messages (millisecon
 const int rx_queue_size = 10; // Receive Queue size
 
 const int nOfMotors = 1; // Number of motors
+const bool ensureMotorCount = true; // halts autohoming if Bottango sends more motors than nOfMotors.
 
 const float maxDistanceAngle = 360.0; // Max travel angle. Best to keep it below 360 degrees
 
@@ -225,6 +226,12 @@ namespace Callbacks
         {
           delay(1);
           int currentId = data.id - 0x400;
+          if (currentId > nOfMotors && ensureMotorCount)
+          {
+            Serial.println("Motor ID out of bounds: max is " + String(nOfMotors) + ", got " + String(currentId) + ". Set ensureMotorCount = false to ignore this.");
+            ahFailed = true;
+            Serial.println("------Auto homing failed------");
+          }
           if (currentId >= 1 && currentId <= nOfMotors && receivedMotorPositions[currentId - 1])
           {
             targetMotorPositionsDeg[currentId - 1] = map(data.p_des_position, -32767, 32767, -716.2, 716.2);
