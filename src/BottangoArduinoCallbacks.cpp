@@ -19,19 +19,23 @@ unsigned long lastTrueTime = 0; // stores the last time allPositionsWithinRange 
 const int interval = 0;       // interval at which send CAN Messages (milliseconds)
 const int rx_queue_size = 10; // Receive Queue size
 
-const int nOfMotors = 5; // Number of motors
+const int nOfMotors = 1; // Number of motors
 
-const bool restrictMotion = true;     // Restrict motion to a certain range
-const float maxDistanceAngle = 180.0; // Maximum travel angles
+const float maxDistanceAngle = 360.0; // Max travel angle. Best to keep it below 360 degrees
 
-float currentMotorPositions[nOfMotors]; // Array to store positions of 7 motors
+float currentMotorPositionsDeg[nOfMotors]; // Array to store positions of 7 motors
 bool receivedMotorPositions[nOfMotors] = {false};
-float targetMotorPositions[nOfMotors];
+float targetMotorPositionsDeg[nOfMotors];
 
-const int AUTO_HOME_SPEED = 30;
+const int numberOfSteps = 1000;   // Number of steps for interpolation
+const int interpolationDelay = 4; // Delay between each step
+int currentStep[nOfMotors];
+int currentDist = 0;
 
-bool autoHoming = false;
-bool ahSent = false;
+unsigned long lastLerpUpdateTime = 0; // Variable to store the last update time
+float previousStepDist = 0;
+
+bool autoHoming = true;
 bool ahFailed = false;
 
 namespace Callbacks
@@ -61,57 +65,15 @@ namespace Callbacks
     }
   }
 
-  float calculateEncoderPosition(float encoder, bool singleTurn = true)
-  { // singleTurn == true returns single turn position, false returns multi-turn position
-    if (singleTurn)
-    {
-      float position = fmod((encoder / 65536.0 * 360.0), 360.0);
-      if (position < 0)
-      {
-        position += 360.0;
-      }
-      return position;
-    }
-    else
-    {
-      return encoder / 65536.0 * 360.0;
-    }
+  float calculateEncoderPosition(float encoder)
+  {
+    // Serial.println("encoder: " + String(encoder));
+    return encoder / 65536.0 * 360.0;
   }
 
   float calculateAngleDistance(float angle1, float angle2)
   {
     return abs(angle1 - angle2);
-  }
-
-  void resetMotorMultiTurnPositions()
-  {
-    for (int motorIndex = 0; motorIndex < nOfMotors; motorIndex++)
-    {
-      int motorId = 0x140 + motorIndex + 1;
-      CAN_frame_t tx_frame;
-      tx_frame.FIR.B.FF = CAN_frame_std;
-      tx_frame.MsgID = motorId;   // CAN ID
-      tx_frame.FIR.B.DLC = 8;     // Data length
-      tx_frame.data.u8[0] = 0x64; // Command byte to reset multi-turn position
-      for (int i = 1; i < 8; i++)
-      {
-        tx_frame.data.u8[i] = 0x00; // NULL rest of data
-      }
-
-      ESP32Can.CANWriteFrame(&tx_frame);
-
-      // Send system reset command
-      CAN_frame_t reset_frame;
-      reset_frame.FIR.B.FF = CAN_frame_std;
-      reset_frame.MsgID = motorId;
-      reset_frame.FIR.B.DLC = 0; // No data
-      reset_frame.data.u8[0] = 0x76;
-      for (int i = 1; i < 8; i++)
-      {
-        reset_frame.data.u8[i] = 0x00; // NULL rest of data
-      }
-      ESP32Can.CANWriteFrame(&reset_frame);
-    }
   }
 
   void requestMotorPositions()
@@ -142,18 +104,55 @@ namespace Callbacks
                             (rx_frame.data.u8[6] << 16) | (rx_frame.data.u8[7] << 24);
           int motorMessageIndex = rx_frame.MsgID - 0x240; // Calculate motor index based on ID
           if (motorMessageIndex >= 1 && motorMessageIndex <= nOfMotors && encoder != 0)
-          {                                                                                          // Ensure the index is within bounds
-            currentMotorPositions[motorMessageIndex - 1] = calculateEncoderPosition(encoder, false); // Store position in the array
-            // Serial.println("Motor " + String(motorMessageIndex) + " position: " + String(currentMotorPositions[motorMessageIndex - 1]));
+          {                                                                                      // Ensure the index is within bounds
+            receivedMotorPositions[motorMessageIndex - 1] = true;                                // Set the flag to true
+            currentMotorPositionsDeg[motorMessageIndex - 1] = calculateEncoderPosition(encoder); // Store position in the array
+            Serial.println("Motor " + String(motorMessageIndex) + " position: " + String(currentMotorPositionsDeg[motorMessageIndex - 1]));
           }
         }
       }
     }
   }
 
+  float requestMotorPosition(int motorId)
+  {
+    int canMotorId = 0x140 + motorId;
+
+    CAN_frame_t tx_frame;
+    tx_frame.FIR.B.FF = CAN_frame_std;
+    tx_frame.MsgID = canMotorId; // CAN ID
+    tx_frame.FIR.B.DLC = 8;      // Data length
+    tx_frame.data.u8[0] = 0x60;  // Command byte to request position
+    for (int i = 1; i < 8; i++)
+    {
+      tx_frame.data.u8[i] = 0x00; // NULL rest of data
+    }
+
+    ESP32Can.CANWriteFrame(&tx_frame);
+
+    delay(10);
+
+    CAN_frame_t rx_frame;
+    if (xQueueReceive(CAN_cfg.rx_queue, &rx_frame, 0) == pdTRUE)
+    {
+      if (rx_frame.MsgID >= 0x240 && rx_frame.MsgID <= 0x240 + nOfMotors)
+      { // Check for correct response IDs
+        int32_t encoder = rx_frame.data.u8[4] | (rx_frame.data.u8[5] << 8) |
+                          (rx_frame.data.u8[6] << 16) | (rx_frame.data.u8[7] << 24);
+        int motorMessageIndex = rx_frame.MsgID - 0x240; // Calculate motor index based on ID
+        if (motorMessageIndex >= 1 && motorMessageIndex <= nOfMotors && encoder != 0)
+        { // Ensure the index is within bounds
+          Serial.println("motor pos: " + String(calculateEncoderPosition(encoder)));
+          return calculateEncoderPosition(encoder); // Store position in the array
+        }
+      }
+    }
+    return 0;
+  }
+
   void sendCustomMotionControlCommand(MotionControlData data)
   {
-    if (!autoHoming)
+    if (true)
     {
       // Parameters for motion control 運動控制参数
       float v_des = 0; // Desired velocity 期望速度
@@ -163,7 +162,7 @@ namespace Callbacks
 
       uint16_t p_des_packed = (uint16_t)(data.p_des_position + 32767.5);
       // uint16_t p_des_packed = (uint16_t)(data.p_des_position + 29350);
-
+      // Serial.println("data.p_des_position: " + String(map(data.p_des_position, -32767, 32767, -716.2, 716.2)));
       uint16_t v_des_packed = (uint16_t)(((v_des + 45) / 90.0) * 4095);
       uint16_t t_ff_packed = (uint16_t)(((t_ff + 24) / 48.0) * 4095);
       uint16_t kp_packed = (uint16_t)((data.kp / 500.0) * 4095);
@@ -187,98 +186,6 @@ namespace Callbacks
 
       ESP32Can.CANWriteFrame(&tx_frame);
     }
-    else if (!ahFailed)
-    {
-      requestMotorPositions();
-
-      strip.setPixelColor(0, strip.Color(20, 15, 0)); // Yellow color
-      strip.show();
-
-      int currentId = data.id - 0x400;
-      if (currentId >= 1 && currentId <= nOfMotors && currentMotorPositions[currentId - 1] != 0)
-      {
-        receivedMotorPositions[currentId - 1] = true;
-        targetMotorPositions[currentId - 1] = map(data.p_des_position, -32767, 32767, -716.2, 716.2);
-        Serial.println("M" + String(currentId) + " -> target: " + String(targetMotorPositions[currentId - 1]) + " current: " + String(currentMotorPositions[currentId - 1]));
-      }
-
-      bool allReceived = true;
-
-      unsigned long lastFalseTime = 0;
-
-      for (int i = 0; i < nOfMotors; i++)
-      {
-        if (!receivedMotorPositions[i])
-        {
-          allReceived = false;
-          break;
-        }
-      }
-
-      bool allPositionsWithinRange = true;
-
-      for (int i = 0; i < nOfMotors; i++)
-      {
-        float currentDistance = calculateAngleDistance(currentMotorPositions[i], targetMotorPositions[i]);
-        if (currentDistance > 5)
-        {
-          // Serial.println("M" + String(i + 1) + " dist: " + String(currentDistance));
-          allPositionsWithinRange = false;
-          lastFalseTime = millis();
-          break;
-        }
-      }
-
-      if (allPositionsWithinRange && allReceived)
-      {
-        unsigned long currentTime = millis();
-        if (currentTime - max(lastTrueTime, lastFalseTime) > 500)
-        {
-          for (int i = 0; i < nOfMotors; i++)
-          {
-            Stop_Motor(i + 1);
-          }
-          autoHoming = false;
-          ahSent = false;
-          allReceived = false;
-          for (int i = 0; i < nOfMotors; i++)
-          {
-            receivedMotorPositions[i] = false;
-          }
-
-          Serial.println("------Auto homing complete------");
-          strip.setPixelColor(0, strip.Color(0, 20, 0)); // Green color
-          strip.show();
-        }
-      }
-      else if (allReceived && !ahSent)
-      {
-        ESP32Can.CANInit();
-        requestMotorPositions();
-        for (int i = 0; i < nOfMotors; i++)
-        {
-          Stop_Motor(i + 1);
-        }
-        delay(10);
-        ahSent = true;
-        for (int i = 0; i < nOfMotors; i++)
-        {
-          float currentDistance = calculateAngleDistance(currentMotorPositions[i], targetMotorPositions[i]);
-          if (restrictMotion && currentDistance > maxDistanceAngle)
-          {
-            allPositionsWithinRange = false;
-            ahFailed = true;
-            Serial.println("Motor " + String(i + 1) + " wants to travel " + String(currentDistance) + "deg, but max is " + String(maxDistanceAngle) + "deg");
-            Serial.println("------Auto homing failed------");
-            break;
-          }
-          int destinationAngle = targetMotorPositions[i] * 100;
-          Serial.println("Sending motor " + String(i + 1) + " to " + String(destinationAngle));
-          sendMotorCommand(destinationAngle, AUTO_HOME_SPEED, 0x140 + i + 1);
-          delay(30);
-        }
-      }
-    }
     else
     {
       strip.setPixelColor(0, strip.Color(20, 0, 20)); // Purple color
@@ -290,25 +197,129 @@ namespace Callbacks
   }
 
   QueueHandle_t signalQueue;
+
   void sendCommandTask(void *parameter)
   {
     MotionControlData data; // Use MotionControlData to receive data
+    Serial.println("------Auto homing started------");
+    bool motorsResponded = false;
+    while (!motorsResponded)
+    {
+      requestMotorPositions();
+      motorsResponded = true;
+      for (int i = 0; i < nOfMotors; i++)
+      {
+        if (!receivedMotorPositions[i])
+        {
+          motorsResponded = false;
+          break;
+        }
+      }
+    }
+
     while (1)
     {
-      if (xQueueReceive(signalQueue, &data, portMAX_DELAY))
+      if (xQueueReceive(signalQueue, &data, portMAX_DELAY) && !ahFailed)
       {
-        sendCustomMotionControlCommand(data);
+        if (autoHoming)
+        {
+          delay(1);
+          int currentId = data.id - 0x400;
+          if (currentId >= 1 && currentId <= nOfMotors && receivedMotorPositions[currentId - 1])
+          {
+            targetMotorPositionsDeg[currentId - 1] = map(data.p_des_position, -32767, 32767, -716.2, 716.2);
+            currentDist = abs(calculateAngleDistance(targetMotorPositionsDeg[currentId - 1], currentMotorPositionsDeg[currentId - 1]));
+            // Serial.println("Motor " + String(currentId) + " current: " + String(currentMotorPositionsDeg[currentId - 1]) + " target: " + String(targetMotorPositionsDeg[currentId - 1]) + " distance: " + String(currentDist));
+
+            if (currentDist > maxDistanceAngle)
+            {
+              Serial.println("Motor " + String(currentId) + " wants to travel " + String(currentDist) + " deg, max is " + String(maxDistanceAngle));
+              ahFailed = true;
+              Serial.println("------Auto homing failed------");
+            }
+
+            // Check if the interpolation delay has passed
+            if (millis() - lastLerpUpdateTime >= (interpolationDelay / nOfMotors))
+            {
+              lastLerpUpdateTime = millis(); // Update the last update time
+
+              // Linear interpolation logic
+              float step = (targetMotorPositionsDeg[currentId - 1] - currentMotorPositionsDeg[currentId - 1]) / numberOfSteps; // Define numberOfSteps based on your requirements
+
+              int stepIndex = currentStep[currentId - 1] + 1; // Increment step index
+
+              if (stepIndex <= numberOfSteps)
+              {
+                currentStep[currentId - 1] = stepIndex; // Update the current step index
+                if (currentDist < maxDistanceAngle)
+                {
+                  MotionControlData interpolatedData = data; // Copy original data
+                  interpolatedData.p_des_position = map(currentMotorPositionsDeg[currentId - 1] + step * stepIndex, -716.2, 716.2, -32767, 32767);
+                  float thisStepDist = abs(interpolatedData.p_des_position - previousStepDist);
+                  if (thisStepDist < 50 || previousStepDist == 0 || true)
+                  {                                                   // not used
+                    sendCustomMotionControlCommand(interpolatedData); // Send interpolated command
+                  }
+                  else
+                  {
+                    Serial.println("Motor " + String(currentId) + " wants to take too big of a step: " + String(thisStepDist));
+                    ahFailed = true;
+                    Serial.println("------Auto homing failed------");
+                  }
+                  previousStepDist = interpolatedData.p_des_position;
+                }
+
+                // Print progress every 100 steps
+                if (stepIndex % 100 == 0)
+                {
+                  Serial.println("Auto-homing progress: " + String((stepIndex * 100) / numberOfSteps) + "%");
+                }
+              }
+
+              // Check if all steps are completed
+              int totalSteps = 0;
+              for (int i = 0; i < nOfMotors; i++)
+              {
+                totalSteps += currentStep[i];
+              }
+
+              if (totalSteps >= numberOfSteps * nOfMotors)
+              {
+                autoHoming = false; // Auto-homing process complete
+                Serial.println("------Auto homing complete------");
+                strip.setPixelColor(0, strip.Color(0, 20, 0)); // Green color
+                strip.show();                                  // Update the strip to show the color
+              }
+            }
+          }
+        }
+        else
+        {
+          sendCustomMotionControlCommand(data);
+        }
       }
     }
   }
+
   void onThisControllerStarted()
   {
     strip.begin(); // Initialize the strip
     strip.show();  // Initialize all pixels to 'off'
-    Motor1_Stop();
-    autoHoming = true;
+
     ahFailed = false;
-    // resetMotorMultiTurnPositions();
+    autoHoming = true;
+
+    // Reset variables
+    for (int i = 0; i < nOfMotors; i++)
+    {
+      currentMotorPositionsDeg[i] = 0.0;
+      receivedMotorPositions[i] = false;
+      targetMotorPositionsDeg[i] = 0.0;
+      currentStep[i] = 0;
+      Serial.println("Motor " + String(i + 1) + " reset");
+    }
+    currentDist = 0;
+
     // Set the first LED to red during startup
     strip.setPixelColor(0, strip.Color(20, 0, 0)); // Red color
     strip.show();                                  // Update the strip to show the color
@@ -332,6 +343,9 @@ namespace Callbacks
     pinMode(CAN_SE_PIN, OUTPUT);
     digitalWrite(CAN_SE_PIN, LOW);
 
+    strip.setPixelColor(0, strip.Color(20, 20, 0)); // Yellow color
+    strip.show();
+
     // Serial.begin(115200);
     CAN_cfg.speed = CAN_SPEED_500KBPS;
     CAN_cfg.tx_pin_id = GPIO_NUM_27;
@@ -351,8 +365,13 @@ namespace Callbacks
 
     delay(10);
 
-    strip.setPixelColor(0, strip.Color(0, 20, 0)); // Green color
-    strip.show();                                  // Update the strip to show the color
+    // strip.setPixelColor(0, strip.Color(0, 20, 0)); // Green color
+    // strip.show();                                  // Update the strip to show the color
+  }
+
+  bool getAutoHomingStatus()
+  {
+    return autoHoming;
   }
 
   void onThisControllerStopped()
@@ -389,8 +408,8 @@ namespace Callbacks
       {
         data.p_des_position = signal; // Assuming 'position' is available in this scope
         data.id = 0x401;              // Adapt this based on your needs
-        data.kp = 80;                 // Adapt this based on your needs45
-        data.kd = 1;                 // Adapt this based on your needs3
+        data.kp = 20;                 // Adapt this based on your needs45
+        data.kd = 0.15;               // Adapt this based on your needs3
         xQueueSend(signalQueue, &data, portMAX_DELAY);
         previousMillis = currentMillis; // Update time for the last command sent
       }
@@ -402,7 +421,7 @@ namespace Callbacks
         data.p_des_position = signal; // Assuming 'position' is available in this scope
         data.id = 0x402;              // Adapt this based on your needs
         data.kp = 80;                 // Adapt this based on your needs
-        data.kd = 1;                // Adapt this based on your needs
+        data.kd = 1;                  // Adapt this based on your needs
         xQueueSend(signalQueue, &data, portMAX_DELAY);
         previousMillis1 = currentMillis;
       }
@@ -410,25 +429,25 @@ namespace Callbacks
     if (strcmp(effectorIdentifier, "3") == 0)
     {
       data.p_des_position = -signal; // Assuming 'position' is available in this scope
-      data.id = 0x403;              // Adapt this based on your needs
-      data.kp = 100;                // Adapt this based on your needs
-      data.kd = 1;                  // Adapt this based on your needs
+      data.id = 0x403;               // Adapt this based on your needs
+      data.kp = 100;                 // Adapt this based on your needs
+      data.kd = 1;                   // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
     if (strcmp(effectorIdentifier, "4") == 0)
     {
       data.p_des_position = signal; // Assuming 'position' is available in this scope
       data.id = 0x404;              // Adapt this based on your needs
-      data.kp = 120;                 // Adapt this based on your needs
-      data.kd = 1;               // Adapt this based on your needs
+      data.kp = 120;                // Adapt this based on your needs
+      data.kd = 1;                  // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
     if (strcmp(effectorIdentifier, "5") == 0)
     {
       data.p_des_position = signal; // Assuming 'position' is available in this scope
       data.id = 0x405;              // Adapt this based on your needs
-      data.kp = 120;                 // Adapt this based on your needs
-      data.kd = 1;               // Adapt this based on your needs
+      data.kp = 120;                // Adapt this based on your needs
+      data.kd = 1;                  // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
     if (strcmp(effectorIdentifier, "6") == 0)
@@ -436,7 +455,7 @@ namespace Callbacks
       data.p_des_position = signal; // Assuming 'position' is available in this scope
       data.id = 0x406;              // Adapt this based on your needs
       data.kp = 80;                 // Adapt this based on your needs
-      data.kd = 1;               // Adapt this based on your needs
+      data.kd = 1;                  // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
     if (strcmp(effectorIdentifier, "7") == 0)
@@ -444,7 +463,7 @@ namespace Callbacks
       data.p_des_position = signal; // Assuming 'position' is available in this scope
       data.id = 0x407;              // Adapt this based on your needs
       data.kp = 80;                 // Adapt this based on your needs
-      data.kd = 1;               // Adapt this based on your needs
+      data.kd = 1;                  // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
   }

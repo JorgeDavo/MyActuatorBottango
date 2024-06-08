@@ -26,6 +26,7 @@ namespace BottangoCore
     extern bool initialized;
 #ifdef USE_COMMAND_STREAM
     extern CommandStreamProvider commandStreamProvider;
+    extern bool getAutoHomingStatus();
 #endif
 
 } // namespace BottangoCore

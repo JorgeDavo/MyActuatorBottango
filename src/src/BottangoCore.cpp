@@ -10,6 +10,10 @@ namespace BottangoCore
     bool initialized = false;
 #ifdef USE_COMMAND_STREAM
     CommandStreamProvider commandStreamProvider = CommandStreamProvider();
+    bool getAutoHomingStatus()
+    {
+        return Callbacks::getAutoHomingStatus();
+    }
 #endif
 
     char serialCommandBuffer[MAX_COMMAND_LENGTH];

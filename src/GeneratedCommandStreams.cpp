@@ -28,11 +28,13 @@ namespace GeneratedCommandStreams
         // if haven't started any animations, or if should loop and nothing is playing (IE the last loop ended)
         if (!playBegan && millis() - startTime >= 2000) // Modified: check if 5 seconds have passed
         {
-#ifndef USE_COMMAND_STREAM
-            // BottangoCore::commandStreamProvider.startCommandStream(startingAnimation, loop);
+#ifdef USE_COMMAND_STREAM
+            BottangoCore::commandStreamProvider.startCommandStream(startingAnimation, loop);
+            if(BottangoCore::getAutoHomingStatus() == false){
+                playBegan = true;
+            }
 #endif
-
-            playBegan = true;
+            // playBegan = true;
         }
     }
 
