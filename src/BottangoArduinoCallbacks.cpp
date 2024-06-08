@@ -19,10 +19,10 @@ unsigned long lastTrueTime = 0; // stores the last time allPositionsWithinRange 
 const int interval = 0;       // interval at which send CAN Messages (milliseconds)
 const int rx_queue_size = 10; // Receive Queue size
 
-const int nOfMotors = 1; // Number of motors
+const int nOfMotors = 5; // Number of motors
 const bool ensureMotorCount = true; // halts autohoming if Bottango sends more motors than nOfMotors.
 
-const float maxDistanceAngle = 360.0; // Max travel angle. Best to keep it below 360 degrees
+const float maxDistanceAngle = 180.0; // Max travel angle. Best to keep it below 360 degrees
 
 float currentMotorPositionsDeg[nOfMotors]; // Array to store positions of 7 motors
 bool receivedMotorPositions[nOfMotors] = {false};
@@ -69,7 +69,7 @@ namespace Callbacks
   float calculateEncoderPosition(float encoder)
   {
     // Serial.println("encoder: " + String(encoder));
-    return encoder / 65536.0 * 360.0;
+    return encoder / 65536.0 * 180.0;
   }
 
   float calculateAngleDistance(float angle1, float angle2)
@@ -415,8 +415,8 @@ namespace Callbacks
       {
         data.p_des_position = signal; // Assuming 'position' is available in this scope
         data.id = 0x401;              // Adapt this based on your needs
-        data.kp = 20;                 // Adapt this based on your needs45
-        data.kd = 0.15;               // Adapt this based on your needs3
+        data.kp = 80;                 // Adapt this based on your needs45
+        data.kd = 1;               // Adapt this based on your needs3
         xQueueSend(signalQueue, &data, portMAX_DELAY);
         previousMillis = currentMillis; // Update time for the last command sent
       }
@@ -437,8 +437,8 @@ namespace Callbacks
     {
       data.p_des_position = -signal; // Assuming 'position' is available in this scope
       data.id = 0x403;               // Adapt this based on your needs
-      data.kp = 100;                 // Adapt this based on your needs
-      data.kd = 1;                   // Adapt this based on your needs
+      data.kp = 180;                 // Adapt this based on your needs
+      data.kd = 2;                   // Adapt this based on your needs
       xQueueSend(signalQueue, &data, portMAX_DELAY);
     }
     if (strcmp(effectorIdentifier, "4") == 0)
