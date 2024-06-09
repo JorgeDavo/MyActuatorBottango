@@ -29,7 +29,7 @@ bool receivedMotorPositions[nOfMotors] = {false};
 float targetMotorPositionsDeg[nOfMotors];
 
 const int numberOfSteps = 1000;   // Number of steps for interpolation
-const int interpolationDelay = 4; // Delay between each step
+const int interpolationDelay = 1; // Delay between each step (actual delay is probably higher)
 int currentStep[nOfMotors];
 int currentDist = 0;
 
